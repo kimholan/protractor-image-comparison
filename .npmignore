@@ -1,5 +1,7 @@
 .DS_Store
 .idea/
+.dist/
+lib/
 node_modules/
 .tmp/
 .gitignore

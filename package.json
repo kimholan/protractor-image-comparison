@@ -4,9 +4,10 @@
   "description": "npm-module to compare images with protractor",
   "main": "index.js",
   "scripts": {
-    "changelog": "node ./test/changelog.js",
-    "commitmsg": "validate-commit-msg",
-    "docs": "jsdoc2md ./index.js > ./docs/index.md",
+    "precompile": "rm -rf dist",
+    "compile": "tsc",
+    "watch": "tsc -w -p tsconfig.json",
+    "lint": "tslint -p tsconfig.json",
     "test": "node ./test/cli image-comparison",
     "test.android.adb": "node ./test/cli image-comparison -r -e android.adb",
     "test.android.chromedriver": "node ./test/cli image-comparison -r -e android.chromedriver",
@@ -18,7 +19,8 @@
     "test.saucelabs": "node ./test/cli image-comparison -r -e saucelabs",
     "unit.test": "JASMINE_CONFIG_PATH=test/unit/jasmine.json jasmine",
     "unit.test.coverage": "JASMINE_CONFIG_PATH=test/unit/jasmine.json istanbul cover jasmine",
-    "wd-update": "node_modules/.bin/webdriver-manager update"
+    "wd-update": "node_modules/.bin/webdriver-manager update",
+    "protractor": "protractor .dist/__tests__/protractor/config/protractor.local.conf.js"
   },
   "repository": {
     "type": "git",
@@ -46,15 +48,18 @@
     "pngjs-image": "0.11.7"
   },
   "devDependencies": {
-    "chalk": "1.1.3",
-    "commander": "2.9.0",
-    "conventional-changelog": "1.1.0",
-    "husky": "^0.13.1",
+    "@types/fs-extra": "5.0.1",
+    "@types/jasmine": "^2.8.6",
+    "@types/node": "^9.6.1",
+    "chalk": "2.3.2",
+    "commander": "2.15.1",
+    "husky": "0.14.3",
     "istanbul": "0.4.5",
-    "jasmine-spec-reporter": "3.2.0",
-    "jsdoc-to-markdown": "2.0.1",
-    "protractor": "^5.1.0",
-    "validate-commit-msg": "^2.11.1"
+    "jasmine-spec-reporter": "4.2.1",
+    "protractor": "5.3.0",
+    "tslint": "5.9.1",
+    "tslint-eslint-rules": "5.1.0",
+    "typescript": "2.8.1"
   },
   "engines": {
     "npm": ">=3.0.0",
