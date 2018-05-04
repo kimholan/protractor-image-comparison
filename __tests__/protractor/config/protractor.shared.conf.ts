@@ -22,7 +22,7 @@ export const config: Config = {
                 browser.logName = _.capabilities.logName;
                 browser.imageComparison = require(join(process.cwd(), '.dist', 'lib', 'interfaces', 'Interfaces')).protractor({
                     baselineFolder: 'here/there/',
-                    debug: false,
+                    debug: true,
                     formatImageName: `{tag}-{somethin}-{width}x{height}`,
                     screenshotPath: 'here/nowhere/'
                 });

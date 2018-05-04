@@ -1,4 +1,4 @@
-import {config} from './protractor.shared.conf.js.js';
+import {config} from './protractor.shared.conf';
 
 config.specs = ['../desktop.spec.js'];
 
