@@ -1,5 +1,5 @@
 import {InstanceData} from "../interfaces/InstanceData";
-import getScreenDimensions from "../scripts/getScreenDimensions";
+import getScreenDimensions from "../client-side-scripts/getScreenDimensions";
 import {enrichInstanceData} from "../utils/utils";
 import screenshotInitializer from "../modules/screenshotInitializer";
 import screenshotReset from "../modules/screenshotReset";

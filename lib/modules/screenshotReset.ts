@@ -1,5 +1,5 @@
-import hideWindowScrollbars from "../scripts/hideWindowScrollbars";
-import disableCssAnimations from "../scripts/disableCssAnimations";
+import hideWindowScrollbars from "../client-side-scripts/hideWindowScrollbars";
+import disableCssAnimations from "../client-side-scripts/disableCssAnimations";
 
 export default async function screenshotReset(
     executor: Function
