@@ -1,10 +1,11 @@
 'use strict';
 
+const libpng = require('node-libpng');
+
 const assert = require('assert');
 const camelCase = require('camel-case');
 const fs = require('fs-extra');
 const path = require('path');
-const PNGImage = require('png-image');
 const resembleJS = require('./lib/resemble');
 
 /**
@@ -20,7 +21,6 @@ const resembleJS = require('./lib/resemble');
  * @param {string} options.formatImageName Custom variables for Image Name (default:{tag}-{browserName}-{width}x{height}-dpr-{dpr})
  * @param {boolean} options.disableCSSAnimation Disable all css animations on a page (default:false)
  * @param {boolean} options.hideScrollBars Hide all scrolls on a page (default:true)
- * @param {boolean} options.nativeWebScreenshot If a native screenshot of a device (complete screenshot) needs to be taken (default:false)
  * @param {boolean} options.ignoreAntialiasing compare images an discard anti aliasing
  * @param {boolean} options.ignoreColors Even though the images are in colour, the comparison wil compare 2 black/white images
  * @param {boolean} options.ignoreTransparentPixel Will ignore all pixels that have some transparency in one of the images
@@ -35,14 +35,11 @@ const resembleJS = require('./lib/resemble');
  * @property {number} devicePixelRatio Ratio of the (vertical) size of one physical pixel on the current display device to the size of one device independent pixels(dips)
  * @property {number} fullPageHeight fullPageHeight of the browser including scrollbars
  * @property {number} fullPageWidth fullPageWidth of the browser including scrollbars *
- * @property {boolean} isLastScreenshot boolean tells if it is the last fullpage screenshot
  * @property {string} logName logName from the capabilities
  * @property {string} name Name from the capabilities
  * @property {string} platformName mobile OS platform to use
  * @property {number} resizeDimensions dimensions that will be used to make the the element coordinates bigger. This needs to be in pixels
  * @property {number} screenshotHeight height of the screenshot of the page
- * @property {object} saveType Object that will the type of save that is being executed
- * @property {boolean} testInBrowser boolean that determines if the test is executed in a browser or not
  * @property {number} viewPortHeight is the height of the browser window's viewport (was innerHeight
  *
  */
@@ -57,14 +54,11 @@ class ProtractorImageComparison {
     this.debug = options.debug || false;
     this.disableCSSAnimation = options.disableCSSAnimation || false;
     this.hideScrollBars = options.hideScrollBars !== false;
-    this.formatString = options.formatImageName || '{tag}-{browserName}-{width}x{height}-dpr-{dpr}';
-
-    this.nativeWebScreenshot = !!options.nativeWebScreenshot;
+    this.formatString = options.formatImageName || '{tag}-{browserName}';
 
     this.ignoreAntialiasing = options.ignoreAntialiasing || false;
     this.ignoreColors = options.ignoreColors || false;
     this.ignoreTransparentPixel = options.ignoreTransparentPixel || false;
-
     this.saveAboveTolerance = options.saveAboveTolerance || 0;
 
 
@@ -77,18 +71,11 @@ class ProtractorImageComparison {
     this.devicePixelRatio = 1;
     this.fullPageHeight = 0;
     this.fullPageWidth = 0;
-    this.isLastScreenshot = false;
     this.logName = '';
     this.name = '';
     this.platformName = '';
     this.resizeDimensions = 0;
     this.screenshotHeight = 0;
-    this.saveType = {
-      element: false,
-      fullPage: false,
-      screen: false
-    };
-    this.testInBrowser = false;
     this.viewPortHeight = 0;
 
     fs.ensureDirSync(this.actualFolder);
@@ -97,25 +84,28 @@ class ProtractorImageComparison {
 
   }
 
+
   /**
    * Checks if image exists as a baseline image, if not, create a baseline image if needed
    * @param {string} tag
+   *
    * @returns {Promise}
    * @private
    */
   _checkImageExists(tag) {
+    const fileName = this._formatFileName(tag);
     return new Promise((resolve, reject) => {
-      fs.access(path.join(this.baselineFolder, this._formatFileName(tag)), error => {
+      fs.access(path.join(this.baselineFolder, fileName), error => {
         if (error) {
           if (this.autoSaveBaseline) {
             try {
-              fs.copySync(path.join(this.actualFolder, this._formatFileName(tag)), path.join(this.baselineFolder, this._formatFileName(tag)));
-              console.log(`\nINFO: Autosaved the image to ${path.join(this.baselineFolder, this._formatFileName(tag))}\n`);
+              fs.copySync(path.join(this.actualFolder, fileName), path.join(this.baselineFolder, fileName));
+              console.log(`\nINFO: Autosaved the image to ${path.join(this.baselineFolder, fileName)}\n`);
             } catch (error) {
               reject(`Image could not be copied. The following error was thrown: ${error}`);
             }
           } else {
-            reject('Image not found, saving current image as new baseline.');
+            reject('Image not found, autoSaveBaseline disabled.');
           }
         }
         resolve();
@@ -126,6 +116,7 @@ class ProtractorImageComparison {
   /**
    * Determine the rectangles conform the correct browser / devicePixelRatio
    * @param {Promise} element The ElementFinder to get the rectangles of
+   *
    * @returns {Promise.<object>} returns the correct rectangles rectangles
    * @private
    */
@@ -150,7 +141,7 @@ class ProtractorImageComparison {
         if (xCoordinate < this.resizeDimensions) {
           console.log('\n WARNING: The x-coordinate may not be negative. No width resizing of the element has been executed\n');
         } else if (((xCoordinate - this.resizeDimensions) + elementWidth + 2 * this.resizeDimensions) > this.browserWidth) {
-          console.log('\n WARNING: The new coordinate may not be outside the screen. No width resizing of the element has been executed\n');
+          console.log('\n WARNING: The new x-coordinate may not be outside the screen. No width resizing of the element has been executed\n');
         } else {
           xCoordinate = xCoordinate - this.resizeDimensions;
           elementWidth = elementWidth + 2 * this.resizeDimensions
@@ -160,7 +151,7 @@ class ProtractorImageComparison {
           console.log('\n WARNING: The y-coordinate may not be negative. No height resizing of the element has been executed\n');
         } else if ((yCoordinate < this.browserHeight && ((yCoordinate - this.resizeDimensions) + elementHeight + 2 * this.resizeDimensions) > this.browserHeight) ||
           ((yCoordinate - this.resizeDimensions) + elementHeight + 2 * this.resizeDimensions) > this.screenshotHeight) {
-          console.log('\n WARNING: The new coordinate may not be outside the screen. No height resizing of the element has been executed\n');
+          console.log('\n WARNING: The new y-coordinate may not be outside the screen. No height resizing of the element has been executed\n');
         } else {
           yCoordinate = yCoordinate - this.resizeDimensions;
           elementHeight = elementHeight + 2 * this.resizeDimensions
@@ -180,6 +171,7 @@ class ProtractorImageComparison {
   /**
    * Determines the image comparison paths with the tags for the paths + filenames
    * @param {string} tag the tag that is used
+   *
    * @returns {Object}
    * @private
    */
@@ -223,11 +215,12 @@ class ProtractorImageComparison {
       console.log('####################################################\n');
     }
 
+    // TODO
     return new Promise(resolve => {
       resembleJS(imageComparisonPaths.baselineImage, imageComparisonPaths.actualImage, compareOptions)
         .onComplete(data => {
           if (Number(data.misMatchPercentage) > saveAboveTolerance || this.debug) {
-            data.getDiffImage().pack().pipe(fs.createWriteStream(imageComparisonPaths.imageDiffPath));
+            data.getDiffImage().writeSync(imageComparisonPaths.imageDiffPath);
           }
           resolve(Number(data.misMatchPercentage));
         });
@@ -316,6 +309,7 @@ class ProtractorImageComparison {
   /**
    * Get the position of a given element according to the TOP of the PAGE
    * @param {Promise} element The ElementFinder that is used to get the position
+   *
    * @returns {Promise} The x/y position of the element
    * @private
    */
@@ -329,6 +323,7 @@ class ProtractorImageComparison {
   /**
    * Get the position of a given element according to the TOP of the WINDOW
    * @param {Promise} element The ElementFinder that is used to get the position
+   *
    * @returns {Promise} The x/y position of the element
    * @private
    */
@@ -341,6 +336,7 @@ class ProtractorImageComparison {
 
   /**
    * Set the data of the instance that is running
+   *
    * @returns {Promise.<object>}
    * @private
    */
@@ -350,7 +346,6 @@ class ProtractorImageComparison {
         this.browserName = browserConfig.capabilities.browserName ? browserConfig.capabilities.browserName.toLowerCase() : '';
         this.logName = browserConfig.capabilities.logName ? browserConfig.capabilities.logName : '';
         this.name = browserConfig.capabilities.name ? browserConfig.capabilities.name : '';
-        this.testInBrowser = this.browserName !== '';
 
         // Used for mobile
         this.platformName = browserConfig.capabilities.platformName ? browserConfig.capabilities.platformName.toLowerCase() : '';
@@ -372,7 +367,8 @@ class ProtractorImageComparison {
    * @method mergeDefaultOptions
    * @param {object} optionsA
    * @param {object} optionsB
-   * @return {object}
+   *
+   * @returns {object}
    * @private
    */
   static _mergeDefaultOptions(optionsA, optionsB) {
@@ -390,6 +386,7 @@ class ProtractorImageComparison {
   /**
    * Return the values of an object multiplied against the devicePixelRatio
    * @param {object} values
+   *
    * @returns {Object}
    * @private
    */
@@ -407,20 +404,21 @@ class ProtractorImageComparison {
    * @param {string} folder path of the folder where the image needs to be saved
    * @param {object} rectangles x, y, height and width data to determine the crop
    * @param {string} tag The tag that is used
+   *
    * @returns {Promise} The image has been saved when the promise is resoled
    * @private
    */
   _saveCroppedScreenshot(bufferedScreenshot, folder, rectangles, tag) {
-    return new PNGImage({
-      imagePath: bufferedScreenshot,
-      imageOutputPath: path.join(folder, this._formatFileName(tag)),
-      cropImage: rectangles
-    }).runWithPromise();
+    const image = libpng.decode(bufferedScreenshot);
+    const clip = libpng.rect(rectangles.x, rectangles.y, rectangles.width, rectangles.height);
+    image.crop(clip);
+    return libpng.writePngFileSync(path.join(folder, this._formatFileName(tag)), image.data, rectangles);
   }
 
   /**
    * Set inline CSS on the page under test that is needed to execute the image comparison.
-   * @return {Promise}
+   *
+   * @returns {Promise}
    * @private
    */
   _setCustomTestCSS() {
@@ -434,7 +432,7 @@ class ProtractorImageComparison {
         'animation-duration: 0s !important;' +
         '}',
         scrollBar = '*::-webkit-scrollbar { display:none; !important}',
-        css = (disableCSSAnimation ? animation : '') + (hideScrollBars ? scrollBar : '') ,
+        css = (disableCSSAnimation ? animation : '') + (hideScrollBars ? scrollBar : ''),
         head = document.head || document.getElementsByTagName('head')[0],
         style = document.createElement('style');
 
@@ -450,21 +448,32 @@ class ProtractorImageComparison {
    * @method checkElement
    *
    * @example
-   * // default usage
-   * browser.ProtractorImageComparison.checkElement(element(By.id('elementId')), 'imageA');
-   * // blockout example
-   * browser.ProtractorImageComparison.checkElement(element(By.id('elementId')), 'imageA', {blockOut: [{x: 10, y: 132, width: 100, height: 50}]});
-   * // Add 15 px to top, right, bottom and left when the cut is calculated (it will automatically use the DPR)
-   * browser.ProtractorImageComparison.saveElement(element(By.id('elementId')), 'imageA', {resizeDimensions: 15});
-   * browser.ProtractorImageComparison.checkElement(element(By.id('elementId')), 'imageA', {resizeDimensions: 15});
+   * // default
+   * browser.protractorImageComparison.checkElement(element(By.id('elementId')), 'imageA');
+   * // With options
+   * browser.protractorImageComparison.checkElement(element(By.id('elementId')), 'imageA', {
+   *      // Blockout the statusbar, mobile only
+   *      blockOutStatusBar: true
+   *      // Blockout a given region || multiple regions
+   *      blockOut: [
+   *        {x: 10, y: 132, width: 100, height: 50},
+   *        {x: 450, y: 300, width: 25, height: 75},
+   *      ],
    * // Disable css animation on all elements
-   * browser.ProtractorImageComparison.saveElement(element(By.id('elementId')), 'imageA', {disableCSSAnimation: true});
-   * // Ignore antialiasing
-   * browser.ProtractorImageComparison.checkElement(element(By.id('elementId')), 'imageA', {ignoreAntialiasing: true});
-   * // Ignore colors
-   * browser.ProtractorImageComparison.checkElement(element(By.id('elementId')), 'imageA', {ignoreColors: true});
-   * // Ignore alpha pixel
-   * browser.ProtractorImageComparison.checkElement(element(By.id('elementId')), 'imageA', {ignoreTransparentPixel: true});
+   *      disableCSSAnimation: true,
+   *      // Add 15 px to top, right, bottom and left when the cut is calculated (it will automatically use the DPR)
+   *      resizeDimensions: 15,
+   *      // Set allowable percentage of mismatches before a diff is saved
+   *      saveAboveTolerance: 0.5,
+   *      // Ignore alpha and or antialiasing and or colors and or less and or nothing and or a transparant pixel
+   *      ignoreAlpha: true,
+   *      ignoreAntialiasing: true,
+   *      ignoreColors: true,
+   *      ignoreLess: true,
+   *      ignoreNothing: true,
+   *      ignoreTransparentPixel: true,
+   *    }
+   * );
    *
    * @param {Promise} element The ElementFinder that is used to get the position
    * @param {string} tag The tag that is used
@@ -477,13 +486,13 @@ class ProtractorImageComparison {
    * @return {Promise} When the promise is resolved it will return the percentage of the difference
    * @public
    */
-  checkElement(element, tag, options) {
+  async checkElement(element, tag, options) {
     const checkOptions = options || {};
-    checkOptions.isScreen = false;
 
-    return this.saveElement(element, tag, checkOptions)
-      .then(() => this._checkImageExists(tag))
-      .then(() => this._executeImageComparison(tag, checkOptions));
+    await this.saveElement(element, tag, checkOptions);
+    await this._checkImageExists(tag);
+
+    return await this._executeImageComparison(tag, checkOptions);
   }
 
   /**
@@ -518,7 +527,6 @@ class ProtractorImageComparison {
    */
   checkScreen(tag, options) {
     let checkOptions = options || {};
-    checkOptions.isScreen = true;
 
     return this.saveScreen(tag, checkOptions)
       .then(() => this._checkImageExists(tag))
@@ -537,45 +545,52 @@ class ProtractorImageComparison {
    * browser.ProtractorImageComparison.saveElement(element(By.id('elementId')), 'imageA', {resizeDimensions: 15});
    * // Disable css animation on all elements
    * browser.ProtractorImageComparison.saveElement(element(By.id('elementId')), 'imageA', {disableCSSAnimation: true});
-   * // Take screenshot directly of a canvas element
-   * browser.ProtractorImageComparison.saveElement(element(By.id('canvasID')), 'imageA', {canvasScreenshot: true});
    *
    * @param {Promise} element The ElementFinder that is used to get the position
    * @param {string} tag The tag that is used
    * @param {object} options (non-default) options
    * @param {int} options.resizeDimensions the value to increase the size of the element that needs to be saved
    * @param {boolean} options.disableCSSAnimation enable or disable CSS animation
-   * @param {boolean} options.canvasScreenshot enable or disable taking screenshot directly from canvas (via dataUrl instead of browser.takeScreenshot()). !!This isn't supported in IE11 and Safari 9!!
    * @returns {Promise} The images has been saved when the promise is resolved
    * @public
    */
-  saveElement(element, tag, options) {
+  async saveElement(element, tag, options) {
     let saveOptions = options || [];
     let bufferedScreenshot;
 
-    this.saveType.element = true;
     this.resizeDimensions = saveOptions.resizeDimensions ? saveOptions.resizeDimensions : this.resizeDimensions;
     this.disableCSSAnimation = saveOptions.disableCSSAnimation || saveOptions.disableCSSAnimation === false ? saveOptions.disableCSSAnimation : this.disableCSSAnimation;
 
-    return this._getInstanceData()
-      .then(() => {
-          if (saveOptions.canvasScreenshot) {
-            return element.getWebElement()
-              .then(elem => browser.executeScript((canvas) => canvas.toDataURL('image/png'), elem))
-              .then(dataUrl => dataUrl.split(',')[1]);
-          } else {
-            return browser.takeScreenshot()
-          }
-        }
-      )
-      .then(screenshot => {
-        bufferedScreenshot = new Buffer(screenshot, 'base64');
-        this.screenshotHeight = (bufferedScreenshot.readUInt32BE(20) / this.devicePixelRatio); // width = 16
+    let instanceData = await this._getInstanceData();
 
-        if (!saveOptions.canvasScreenshot)
-          return this._determineRectangles(element);
-      })
-      .then(rectangles => this._saveCroppedScreenshot(bufferedScreenshot, this.actualFolder, rectangles, tag));
+
+    if (this.autoSaveBaseline) {
+      // Workaround for (partial) blank screenshots
+      let screenshots = [];
+      screenshots.push(Buffer.from(await browser.takeScreenshot(), 'base64'));
+      screenshots.push(Buffer.from(await browser.takeScreenshot(), 'base64'));
+
+      bufferedScreenshot = screenshots[0];
+      if (screenshots[0].equals(screenshots[1])) {
+        bufferedScreenshot = screenshots[1];
+      } else {
+        screenshots.push(Buffer.from(await browser.takeScreenshot(), 'base64'));
+        if (screenshots[0].equals(screenshots[2])) {
+          bufferedScreenshot = screenshots[2];
+        } else if (screenshots[1].equals(screenshots[2])) {
+          bufferedScreenshot = screenshots[1];
+        } else {
+          console.log('WARNING Unstable screenshots');
+        }
+      }
+    } else {
+      bufferedScreenshot = Buffer.from(await browser.takeScreenshot(), 'base64');
+    }
+
+    this.screenshotHeight = (bufferedScreenshot.readUInt32BE(20) / this.devicePixelRatio); // width = 16
+
+    let rectangles = await this._determineRectangles(element);
+    return await this._saveCroppedScreenshot(bufferedScreenshot, this.actualFolder, rectangles, tag);
   }
 
 
@@ -585,27 +600,31 @@ class ProtractorImageComparison {
    * @method saveScreen
    *
    * @example
-   * // Default
-   * browser.ProtractorImageComparison.saveScreen('imageA');
+   * // default
+   * browser.protractorImageComparison.saveScreen('imageA');
+   * // With options
+   * browser.protractorImageComparison.saveScreen('imageA', {
    * // Disable css animation on all elements
-   * browser.ProtractorImageComparison.saveScreen('imageA',{disableCSSAnimation: true});
+   *      disableCSSAnimation: true,
+   *    }
+   * );
    *
    * @param {string} tag The tag that is used
    * @param {object} options (non-default) options
    * @param {boolean} options.disableCSSAnimation enable or disable CSS animation
+   *
    * @returns {Promise} The image has been saved when the promise is resolved
    * @public
    */
   saveScreen(tag, options) {
     let saveOptions = options || [];
 
-    this.saveType.screen = true;
     this.disableCSSAnimation = saveOptions.disableCSSAnimation || saveOptions.disableCSSAnimation === false ? saveOptions.disableCSSAnimation : this.disableCSSAnimation;
 
     return this._getInstanceData()
       .then(() => browser.takeScreenshot())
       .then(screenshot => {
-        const bufferedScreenshot = new Buffer(screenshot, 'base64');
+        const bufferedScreenshot = Buffer.from(screenshot, 'base64');
         this.screenshotHeight = (bufferedScreenshot.readUInt32BE(20) / this.devicePixelRatio); // width = 16
 
         const rectangles = this._multiplyObjectValuesAgainstDPR({
@@ -619,4 +638,4 @@ class ProtractorImageComparison {
   }
 }
 
-module.exports = ProtractorImageComparison;
+module.exports = protractorImageComparison;
