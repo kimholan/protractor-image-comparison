@@ -43,7 +43,8 @@
     "camel-case": "3.0.0",
     "fs-extra": "1.0.0",
     "node-libpng": "0.2.6",
-    "protractor": "5.4.1"
+    "protractor": "5.4.1",
+    "canvas-prebuilt" : "2.0.0-alpha.14"
   },
   "devDependencies": {
     "chalk": "1.1.3",

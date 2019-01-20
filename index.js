@@ -1,12 +1,11 @@
 'use strict';
 
 const libpng = require('node-libpng');
-
 const assert = require('assert');
 const camelCase = require('camel-case');
 const fs = require('fs-extra');
 const path = require('path');
-const resembleJS = require('./lib/resemble');
+const resembleJS = require('./lib/compareImages');
 
 /**
  * image-diff protractor plugin class
@@ -198,16 +197,22 @@ class ProtractorImageComparison {
    * @returns {Promise}
    * @private
    */
-  _executeImageComparison(tag, compareOptions) {
+  async _executeImageComparison(tag, compareOptions) {
     const imageComparisonPaths = this._determineImageComparisonPaths(tag);
     const ignoreRectangles = 'blockOut' in compareOptions ? compareOptions.blockOut : [];
     const saveAboveTolerance = compareOptions.saveAboveTolerance || this.saveAboveTolerance;
+    const options = {
+      ignore: []
+    };
 
-    // comparison options are not available anymore, due to new version and api
+    compareOptions.ignoreAlpha = 'ignoreAlpha' in compareOptions ? compareOptions.ignoreAlpha : this.ignoreAlpha;
     compareOptions.ignoreAntialiasing = 'ignoreAntialiasing' in compareOptions ? compareOptions.ignoreAntialiasing : this.ignoreAntialiasing;
     compareOptions.ignoreColors = 'ignoreColors' in compareOptions ? compareOptions.ignoreColors : this.ignoreColors;
+    compareOptions.ignoreLess = 'ignoreLess' in compareOptions ? compareOptions.ignoreLess : this.ignoreLess;
+    compareOptions.ignoreNothing = 'ignoreNothing' in compareOptions ? compareOptions.ignoreNothing : this.ignoreNothing;
     compareOptions.ignoreRectangles = 'ignoreRectangles' in compareOptions ? compareOptions.ignoreRectangles.concat(ignoreRectangles) : ignoreRectangles;
     compareOptions.ignoreTransparentPixel = 'ignoreTransparentPixel' in compareOptions ? compareOptions.ignoreTransparentPixel : this.ignoreTransparentPixel;
+    compareOptions.ignoreRectangles = compareOptions.ignoreRectangles.map(rectangles => this._multiplyObjectValuesAgainstDPR(rectangles));
 
     if (this.debug) {
       console.log('\n####################################################');
@@ -215,16 +220,37 @@ class ProtractorImageComparison {
       console.log('####################################################\n');
     }
 
-    // TODO
-    return new Promise(resolve => {
-      resembleJS(imageComparisonPaths.baselineImage, imageComparisonPaths.actualImage, compareOptions)
-        .onComplete(data => {
-          if (Number(data.misMatchPercentage) > saveAboveTolerance || this.debug) {
-            data.getDiffImage().writeSync(imageComparisonPaths.imageDiffPath);
-          }
-          resolve(Number(data.misMatchPercentage));
-        });
-    });
+    if (compareOptions.ignoreAlpha) {
+      options.ignore.push('alpha')
+    }
+    if (compareOptions.ignoreAntialiasing) {
+      options.ignore.push('antialiasing')
+    }
+    if (compareOptions.ignoreColors) {
+      options.ignore.push('colors')
+    }
+    if (compareOptions.ignoreLess) {
+      options.ignore.push('less')
+    }
+    if (compareOptions.ignoreNothing) {
+      options.ignore.push('nothing')
+    }
+
+    options.ignoreRectangles = compareOptions.ignoreRectangles;
+    options.ignoreTransparentPixel = compareOptions.ignoreTransparentPixel;
+
+
+    const data = await resembleJS(
+      fs.readFileSync(imageComparisonPaths.baselineImage),
+      fs.readFileSync(imageComparisonPaths.actualImage),
+      options
+    );
+
+    const misMatchPercentage = this.rawMisMatchPercentage ? data.rawMisMatchPercentage : Number(data.rawMisMatchPercentage.toFixed(2));
+    if (misMatchPercentage > saveAboveTolerance || this.debug) {
+      fs.writeFileSync(imageComparisonPaths.imageDiffPath, data.getBuffer());
+    }
+    return misMatchPercentage;
   }
 
   /**
@@ -340,24 +366,22 @@ class ProtractorImageComparison {
    * @returns {Promise.<object>}
    * @private
    */
-  _getInstanceData() {
-    return browser.getProcessedConfig()
-      .then(browserConfig => {
-        this.browserName = browserConfig.capabilities.browserName ? browserConfig.capabilities.browserName.toLowerCase() : '';
-        this.logName = browserConfig.capabilities.logName ? browserConfig.capabilities.logName : '';
-        this.name = browserConfig.capabilities.name ? browserConfig.capabilities.name : '';
+  async _getInstanceData() {
+    const browserConfig = await browser.getProcessedConfig();
 
-        // Used for mobile
-        this.platformName = browserConfig.capabilities.platformName ? browserConfig.capabilities.platformName.toLowerCase() : '';
-        this.deviceName = browserConfig.capabilities.deviceName ? browserConfig.capabilities.deviceName.toLowerCase() : '';
-        // this.nativeWebScreenshot of the constructor can be overruled by the capabilities when the constructor value is false
-        if (!this.nativeWebScreenshot) {
-          this.nativeWebScreenshot = !!browserConfig.capabilities.nativeWebScreenshot;
-        }
+    this.browserName = browserConfig.capabilities.browserName ? browserConfig.capabilities.browserName.toLowerCase() : '';
+    this.logName = browserConfig.capabilities.logName ? browserConfig.capabilities.logName : '';
+    this.name = browserConfig.capabilities.name ? browserConfig.capabilities.name : '';
 
-        return this._setCustomTestCSS();
-      })
-      .then(() => this._getBrowserData());
+    // Used for mobile
+    this.platformName = browserConfig.capabilities.platformName ? browserConfig.capabilities.platformName.toLowerCase() : '';
+    this.deviceName = browserConfig.capabilities.deviceName ? browserConfig.capabilities.deviceName.toLowerCase() : '';
+    // this.nativeWebScreenshot of the constructor can be overruled by the capabilities when the constructor value is false
+    if (!this.nativeWebScreenshot) {
+      this.nativeWebScreenshot = !!browserConfig.capabilities.nativeWebScreenshot;
+    }
+    this._setCustomTestCSS();
+    this._getBrowserData();
   }
 
 
@@ -449,9 +473,9 @@ class ProtractorImageComparison {
    *
    * @example
    * // default
-   * browser.protractorImageComparison.checkElement(element(By.id('elementId')), 'imageA');
+   * browser.ProtractorImageComparison.checkElement(element(By.id('elementId')), 'imageA');
    * // With options
-   * browser.protractorImageComparison.checkElement(element(By.id('elementId')), 'imageA', {
+   * browser.ProtractorImageComparison.checkElement(element(By.id('elementId')), 'imageA', {
    *      // Blockout the statusbar, mobile only
    *      blockOutStatusBar: true
    *      // Blockout a given region || multiple regions
@@ -525,12 +549,12 @@ class ProtractorImageComparison {
    * @return {Promise} When the promise is resolved it will return the percentage of the difference
    * @public
    */
-  checkScreen(tag, options) {
+  async checkScreen(tag, options) {
     let checkOptions = options || {};
 
-    return this.saveScreen(tag, checkOptions)
-      .then(() => this._checkImageExists(tag))
-      .then(() => this._executeImageComparison(tag, checkOptions));
+    await this.saveScreen(tag, checkOptions);
+    await this._checkImageExists(tag);
+    await this._executeImageComparison(tag, checkOptions);
   }
 
   /**
@@ -589,8 +613,8 @@ class ProtractorImageComparison {
 
     this.screenshotHeight = (bufferedScreenshot.readUInt32BE(20) / this.devicePixelRatio); // width = 16
 
-    let rectangles = await this._determineRectangles(element);
-    return await this._saveCroppedScreenshot(bufferedScreenshot, this.actualFolder, rectangles, tag);
+    const rectangles = await this._determineRectangles(element);
+    await this._saveCroppedScreenshot(bufferedScreenshot, this.actualFolder, rectangles, tag);
   }
 
 
@@ -601,9 +625,9 @@ class ProtractorImageComparison {
    *
    * @example
    * // default
-   * browser.protractorImageComparison.saveScreen('imageA');
+   * browser.ProtractorImageComparison.saveScreen('imageA');
    * // With options
-   * browser.protractorImageComparison.saveScreen('imageA', {
+   * browser.ProtractorImageComparison.saveScreen('imageA', {
    * // Disable css animation on all elements
    *      disableCSSAnimation: true,
    *    }
@@ -616,26 +640,25 @@ class ProtractorImageComparison {
    * @returns {Promise} The image has been saved when the promise is resolved
    * @public
    */
-  saveScreen(tag, options) {
+  async saveScreen(tag, options) {
     let saveOptions = options || [];
 
     this.disableCSSAnimation = saveOptions.disableCSSAnimation || saveOptions.disableCSSAnimation === false ? saveOptions.disableCSSAnimation : this.disableCSSAnimation;
 
-    return this._getInstanceData()
-      .then(() => browser.takeScreenshot())
-      .then(screenshot => {
-        const bufferedScreenshot = Buffer.from(screenshot, 'base64');
-        this.screenshotHeight = (bufferedScreenshot.readUInt32BE(20) / this.devicePixelRatio); // width = 16
+    await this._getInstanceData();
+    const screenshot = await browser.takeScreenshot();
 
-        const rectangles = this._multiplyObjectValuesAgainstDPR({
-          height: this.screenshotHeight > this.viewPortHeight ? this.screenshotHeight : this.viewPortHeight,
-          width: this.viewPortWidth,
-          x: 0,
-          y: 0
-        });
-        return this._saveCroppedScreenshot(bufferedScreenshot, this.actualFolder, rectangles, tag);
-      });
+    const bufferedScreenshot = Buffer.from(screenshot, 'base64');
+    this.screenshotHeight = (bufferedScreenshot.readUInt32BE(20) / this.devicePixelRatio); // width = 16
+
+    const rectangles = this._multiplyObjectValuesAgainstDPR({
+      height: this.screenshotHeight > this.viewPortHeight ? this.screenshotHeight : this.viewPortHeight,
+      width: this.viewPortWidth,
+      x: 0,
+      y: 0
+    });
+    await this._saveCroppedScreenshot(bufferedScreenshot, this.actualFolder, rectangles, tag);
   }
 }
 
-module.exports = protractorImageComparison;
+module.exports = ProtractorImageComparison;
